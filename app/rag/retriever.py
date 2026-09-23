@@ -115,7 +115,13 @@ def retrieve(question: str, platform: Optional[str] = None) -> List[Document]:
     doc_score_pairs = list(zip(combined, scores))
     doc_score_pairs.sort(key=lambda x: x[1], reverse=True)
     
-    # Étape 4 : Ne conserver que les top_k
-    top_docs = [doc for doc, score in doc_score_pairs[:settings.top_k]]
+    # Seuil de pertinence minimum (CrossEncoder ms-marco-MiniLM-L-6-v2)
+    # Un score inférieur à -1.0 correspond à un document hors-sujet sans rapport direct
+    RELEVANCE_THRESHOLD = -1.0
+    relevant_pairs = [p for p in doc_score_pairs if p[1] >= RELEVANCE_THRESHOLD]
+    
+    # Étape 4 : Ne conserver que les top_k documents réellement pertinents
+    top_docs = [doc for doc, score in relevant_pairs[:settings.top_k]]
     
     return top_docs
+

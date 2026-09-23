@@ -64,18 +64,14 @@ def router_node(state: AgentState) -> dict:
             history_summary += f"Utilisateur : {msg.content}\n"
         elif isinstance(msg, AIMessage):
             # On tronque la réponse pour ne pas surcharger le routeur
-            truncated = msg.content[:200] + "..." if len(msg.content) > 200 else msg.content
+            truncated = msg.content[:150] + "..." if len(msg.content) > 150 else msg.content
             history_summary += f"Assistant : {truncated}\n"
-    
-    # Prompt enrichi avec l'historique
-    enriched_prompt = INTENT_DETECTION_PROMPT + """
-
-HISTORIQUE RÉCENT DE LA CONVERSATION (utilise-le pour comprendre les questions de suivi) :
-{history}
-"""
+            
+    if not history_summary.strip():
+        history_summary = "(Aucun échange précédent, début de la conversation)\n"
     
     prompt = PromptTemplate(
-        template=enriched_prompt,
+        template=INTENT_DETECTION_PROMPT,
         input_variables=["question", "history"],
     )
     
@@ -90,7 +86,7 @@ HISTORIQUE RÉCENT DE LA CONVERSATION (utilise-le pour comprendre les questions 
             intent = "rag"
             
         platform = result.get("platform")
-        if isinstance(platform, str) and platform.lower() in ["null", "none", ""]:
+        if isinstance(platform, str) and platform.lower() in ["null", "none", "", "null"]:
             platform = None
             
         print(f"[Agent] Intention détectée : {intent.upper()} (Plateforme: {platform})")
@@ -108,8 +104,24 @@ def rag_node(state: AgentState) -> dict:
     Cherche dans la documentation (ChromaDB) et génère une réponse
     contextualisée en tenant compte de l'historique.
     """
+    from app.rag.vector_store import get_known_platforms
+    
     messages = state["messages"]
     platform = state.get("platform")
+    
+    # 1. Vérification préventive anti-hallucination :
+    # Si l'utilisateur demande une plateforme spécifique qui n'existe pas dans l'ENT,
+    # on refuse immédiatement sans chercher ni laisser le LLM deviner.
+    known_platforms = get_known_platforms()
+    if platform and known_platforms:
+        # Correspondance insensible à la casse
+        if platform.upper() not in known_platforms:
+            answer = f"Je ne dispose pas d'informations sur la solution '{platform}' au sein de l'Espace Numérique de Travail (ENT) de Tech Pole Expertise."
+            return {
+                "messages": [AIMessage(content=answer)],
+                "answer": answer,
+                "sources": [],
+            }
     
     # Extraire la dernière question
     last_question = ""
@@ -118,8 +130,8 @@ def rag_node(state: AgentState) -> dict:
             last_question = msg.content
             break
     
-    # Générer la réponse via le RAG existant
-    answer, sources = answer_question(last_question, platform=platform)
+    # Générer la réponse via le RAG existant avec l'historique complet
+    answer, sources = answer_question(messages, platform=platform)
     
     return {
         "messages": [AIMessage(content=answer)],
